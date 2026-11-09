@@ -238,21 +238,24 @@ private struct FilterPillItem: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 Text(shortTitle)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1)
                 Text("\(count)")
-                    .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                    .padding(.horizontal, 5)
+                    .padding(.horizontal, 4.5)
                     .padding(.vertical, 1)
                     .background(
                         Capsule()
                             .fill(Color.primary.opacity(isSelected ? 0.14 : 0.06))
                     )
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4.5)
             .glassEffect(
                 isSelected ? .regular.tint(Color.accentColor.opacity(0.32)).interactive() : .regular.interactive(),
                 in: Capsule()

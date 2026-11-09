@@ -12,12 +12,13 @@ struct LiquidBrewApp: App {
     var body: some Scene {
         WindowGroup("LiquidBrew") {
             MainContentView(store: store)
-                .frame(minWidth: 1120, minHeight: 740)
+                .frame(minWidth: 1180, minHeight: 740)
                 .background(LiquidMeshBackground())
                 .task {
                     await store.refreshAll()
                 }
         }
+        .defaultSize(width: 1280, height: 800)
         .windowToolbarStyle(.unified(showsTitle: true))
         .commands {
             CommandGroup(replacing: .newItem) {}
@@ -54,15 +55,16 @@ struct LiquidBrewApp: App {
 
 public struct MainContentView: View {
     @ObservedObject public var store: BrewStore
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     public init(store: BrewStore) {
         self.store = store
     }
 
     public var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             LiquidSidebarView(store: store)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 270)
+                .navigationSplitViewColumnWidth(min: 215, ideal: 230, max: 260)
         } detail: {
             ZStack(alignment: .bottom) {
                 Group {
@@ -143,6 +145,7 @@ public struct MainContentView: View {
                 }
             }
         }
+        .navigationSplitViewStyle(.balanced)
     }
 }
 
@@ -166,8 +169,8 @@ struct LiquidSidebarView: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
+            GlassEffectContainer(spacing: 6) {
+                HStack(spacing: 6) {
                     SidebarMetricCapsule(
                         title: "Formulae",
                         count: store.installedPackages.filter { !$0.isCask }.count,
