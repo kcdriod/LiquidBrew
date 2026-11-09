@@ -5,3 +5,5 @@
 xcuserdata/
 .DS_Store
 LiquidBrew.app/
+.worktrees/
+
