@@ -195,15 +195,14 @@ struct LiquidSidebarView: View {
 
     @ViewBuilder
     private func sidebarItem(for tab: NavigationTab) -> some View {
-        NavigationLink(value: tab) {
-            Label {
-                Text(tab.rawValue)
-                    .font(.system(size: 13, weight: .medium))
-            } icon: {
-                Image(systemName: tab.iconName)
-                    .symbolRenderingMode(.hierarchical)
-            }
+        Label {
+            Text(tab.rawValue)
+                .font(.system(size: 13, weight: .medium))
+        } icon: {
+            Image(systemName: tab.iconName)
+                .symbolRenderingMode(.hierarchical)
         }
+        .tag(tab)
         .badge(badgeCount(for: tab) ?? 0)
     }
 
