@@ -12,7 +12,7 @@ public enum GraphLayoutMode: String, CaseIterable, Identifiable {
 
     public var iconName: String {
         switch self {
-        case .radial: return "Slowmo"
+        case .radial: return "circle.hexagongrid.fill"
         case .hierarchical: return "point.3.connected.trianglepath.dotted"
         }
     }
