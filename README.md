@@ -32,6 +32,28 @@ shasum -a 256 -c LiquidBrew-1.0.0-universal.dmg.sha256
 
 Use the filename matching the version you downloaded. You can also [build from source](#build-from-source).
 
+## Screenshots
+
+### Discover: Top Charts
+
+Browse popular software with download counts, reporting dates, descriptions, and installation status.
+
+![Discover showing the 30-day formula download chart](docs/screenshots/discover.png)
+
+### Installed packages and details
+
+Inspect versions, package metadata, actions, and dependencies. This screenshot focuses on the package workspace with the navigation sidebar hidden.
+
+![Package browser with curl selected and its details visible](docs/screenshots/packages.png)
+
+### Interactive dependency graph
+
+Explore a formula's dependencies and reverse dependencies in the radial layout. The navigation sidebar and node inspector are hidden here to give the graph more room.
+
+![Radial graph showing curl dependencies and the package that uses it](docs/screenshots/dependency-graph.png)
+
+Screenshots show the macOS app in dark appearance. Package inventories, versions, and chart data vary by Mac and date; the last two images are cropped to the workspace content.
+
 ## Features
 
 | Workspace | What you can do |
