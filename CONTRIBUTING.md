@@ -46,7 +46,7 @@ Describe the concrete problem and resulting behavior. Include:
 
 Contributor PRs need **PR branch policy** and **Develop tests** to pass. Develop tests validate scripts, exercise release-version automation, and run deterministic Swift tests on macOS 26. Request review from **@kcdriod**, the code owner. New commits dismiss stale approvals. Resolve review conversations and update your branch against `develop` before merging.
 
-Passing tests alone are not permission to merge: code-owner approval is required, and only people with repository merge permission can merge. Administrators follow the same protection rules. GitHub does not let a PR author approve their own PR; do not bypass review by using automation to impersonate a reviewer.
+Only people with repository merge permission can merge. Other collaborators need code-owner approval from **@kcdriod**; new commits dismiss stale approval. **@kcdriod** has a review-only exception and may merge a passing PR, including an owner-authored PR, without a separate approving review. Use GitHub's owner bypass option for that review rule after the checks pass. This exception cannot bypass tests, PR routing, the up-to-date requirement, or resolved conversations. Direct pushes remain blocked for everyone. Do not use automation to impersonate a reviewer or manufacture a self-approval.
 
 ## Reporting bugs and requesting features
 
@@ -60,7 +60,7 @@ For a feature, explain the task you are trying to accomplish and what would impr
 
 1. Open a PR from this repository's **`develop` to `master`**.
 2. The required **Master full suite** runs release-automation tests and all Swift tests, including Homebrew/news/analytics live checks. It builds an optimized universal app and verifies a validation DMG. **PR branch policy** also checks the source branch and repository.
-3. Obtain the required code-owner review from **@kcdriod**. Keep the branch up to date and resolve all review conversations.
+3. Obtain code-owner review from **@kcdriod**, or use the review-only exception if merging as that owner account. Keep the branch up to date and resolve all review conversations.
 4. Merge only after every required check and review passes. Use the merge-commit option; the repository disables squash/rebase merges to preserve promotion history.
 5. The merged PR triggers **Release DMG**, which builds the exact merge commit, reserves its version tag, and publishes the DMG and checksum.
 6. Synchronize `master` back into `develop` through a normal PR before the next promotion when GitHub reports that `develop` is behind. Both long-lived branches are protected against deletion.
