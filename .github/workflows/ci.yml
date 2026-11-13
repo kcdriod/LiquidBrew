@@ -1,0 +1,45 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: macOS build and tests
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select the full Xcode toolchain
+        shell: bash
+        run: |
+          if [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer" >> "$GITHUB_ENV"
+          else
+            echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+          fi
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Check scripts and whitespace
+        run: |
+          zsh -n build_app.sh scripts/build_dmg.sh
+          git diff --check
+      - name: Run deterministic tests
+        run: swift test --disable-sandbox
+      - name: Build and verify the app bundle
+        run: ./build_app.sh

@@ -6,4 +6,10 @@ xcuserdata/
 .DS_Store
 LiquidBrew.app/
 .worktrees/
+dist/
+.env
+.env.*
+*.p12
+*.p8
+*.mobileprovision
 

@@ -11,6 +11,7 @@ public enum NavigationTab: String, CaseIterable, Identifiable, Hashable {
     case graph = "Dependency Graph"
     case taps = "Taps & Brewfile"
     case health = "Health & Cleanup"
+    case security = "Security"
 
     public var id: String { rawValue }
 
@@ -23,6 +24,7 @@ public enum NavigationTab: String, CaseIterable, Identifiable, Hashable {
         case .graph: return "point.3.connected.trianglepath.dotted"
         case .taps: return "spigot.fill"
         case .health: return "stethoscope"
+        case .security: return "shield.lefthalf.filled"
         }
     }
 
@@ -35,6 +37,7 @@ public enum NavigationTab: String, CaseIterable, Identifiable, Hashable {
         case .graph: return "Visual Dependency Tree"
         case .taps: return "Repositories & Bundle"
         case .health: return "Doctor & Disk Space"
+        case .security: return "Reports & Package Warnings"
         }
     }
 }
@@ -52,7 +55,7 @@ public enum PackageFilter: String, CaseIterable, Identifiable {
 
 // MARK: - Core Homebrew Models
 
-public struct BrewPackage: Identifiable, Hashable, Codable {
+public struct BrewPackage: Identifiable, Hashable, Codable, Sendable {
     public var id: String { "\(isCask ? "cask" : "formula"):\(name)" }
     public let name: String
     public let fullName: String

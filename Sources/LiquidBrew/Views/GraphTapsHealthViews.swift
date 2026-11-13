@@ -81,7 +81,7 @@ public struct DependencyGraphView: View {
             if showLeavesOnlyInSidebar && !pkg.isLeaf {
                 return false
             }
-            let query = sidebarFilterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let query = store.searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if query.isEmpty { return true }
             return pkg.name.lowercased().contains(query) || (pkg.desc?.lowercased().contains(query) ?? false)
         }
@@ -116,50 +116,36 @@ public struct DependencyGraphView: View {
                 isLeaf: false
             )
         }
-        return activeFocusedPackage
+        return nil
     }
 
     public var body: some View {
-        HStack(spacing: 16) {
-            // Left Formula Selector Sidebar
+        HSplitView {
             formulaSelectorSidebar
-                .frame(width: 265)
-
-            // Main Graph Canvas + Controls + Floating HUD
-            ZStack {
+                .frame(minWidth: 200, idealWidth: 230, maxWidth: 300)
+            VStack(spacing: 0) {
+                graphTopToolbar.glassToolbar()
                 graphCanvasContainer
-
-                VStack(spacing: 0) {
-                    graphTopToolbar
-                        .padding(14)
-
-                    Spacer()
-
-                    HStack(alignment: .bottom, spacing: 14) {
-                        graphLegendPill
-
-                        Spacer()
-
+                    .overlay(alignment: .bottomTrailing) {
                         if let inspected = inspectedPackage {
                             nodeInspectorHUD(for: inspected)
-                                .frame(width: 340)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .frame(width: 280)
+                                .padding(12)
                         }
                     }
-                    .padding(14)
-                }
+                graphLegendPill
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .liquidGlassCard(cornerRadius: 20)
+            .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 18)
-        .onAppear {
-            syncInitialSelection()
+        .onAppear { syncInitialSelection() }
+        .onChange(of: installedFormulae.isEmpty) { _, isEmpty in
+            if !isEmpty { syncInitialSelection() }
         }
-        .onChange(of: store.selectedPackage) { _, newValue in
-            if let pkg = newValue, !pkg.isCask {
-                focusedPackageName = pkg.name
-                selectedNodeName = pkg.name
+        .onChange(of: store.selectedPackage) { _, package in
+            if let package, !package.isCask {
+                focusedPackageName = package.name
+                selectedNodeName = package.name
             }
         }
     }
@@ -179,227 +165,58 @@ public struct DependencyGraphView: View {
     // MARK: - Sidebar
 
     private var formulaSelectorSidebar: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Formulae Nodes", systemImage: "point.3.filled.connected.trianglepath.dotted")
-                    .font(.system(size: 13.5, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.primary)
-                Spacer()
-                GlassBadge("\(filteredSidebarFormulae.count)", color: .cyan)
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker("Scope", selection: $scopeMode) {
+                    Text("Selected Formula").tag(GraphScopeMode.focused)
+                    Text("Top-Level Network").tag(GraphScopeMode.leavesNetwork)
+                }
+                Toggle("Top-level packages only", isOn: $showLeavesOnlyInSidebar)
+                    .toggleStyle(.checkbox)
             }
-
-            // Scope Switcher
-            HStack(spacing: 6) {
-                ForEach(GraphScopeMode.allCases) { mode in
-                    let isSelected = scopeMode == mode
-                    Button {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
-                            scopeMode = mode
-                            resetViewport()
-                        }
-                    } label: {
-                        Text(mode.rawValue)
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .foregroundStyle(isSelected ? Color.white : Color.secondary)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(isSelected ? Color.cyan.opacity(0.75) : Color.white.opacity(0.05))
-                            )
+            .glassToolbar()
+            List(filteredSidebarFormulae) { package in
+                Button {
+                    scopeMode = .focused
+                    focusedPackageName = package.name
+                    selectedNodeName = package.name
+                    store.selectedPackage = package
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(package.name).fontWeight(.medium)
+                        Text("\(package.dependencies.count) dependencies")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 3)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .listRowBackground(activeFocusedPackage?.id == package.id ? Color.accentColor.opacity(0.15) : Color.clear)
             }
-            .padding(4)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.black.opacity(0.18))
-            )
-
-            // Search box + Leaves filter
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color.secondary)
-                TextField("Filter formulae...", text: $sidebarFilterText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .rounded))
-                if !sidebarFilterText.isEmpty {
-                    Button {
-                        sidebarFilterText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.black.opacity(0.18))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.8)
-                    )
-            )
-
-            Toggle(isOn: $showLeavesOnlyInSidebar) {
-                HStack(spacing: 5) {
-                    Image(systemName: "leaf.fill")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Color.mint)
-                    Text("Top-level leaves only")
-                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color.secondary)
-                }
-            }
-            .toggleStyle(.checkbox)
-
-            Divider()
-                .overlay(Color.white.opacity(0.08))
-
-            if filteredSidebarFormulae.isEmpty {
-                VStack(spacing: 8) {
-                    Spacer()
-                    Image(systemName: "cube.transparent")
-                        .font(.system(size: 26))
-                        .foregroundStyle(Color.secondary)
-                    Text("No matching formulae")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color.secondary)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 5) {
-                        ForEach(filteredSidebarFormulae) { pkg in
-                            let isSelected = (activeFocusedPackage?.name == pkg.name && scopeMode == .focused) || (selectedNodeName == pkg.name)
-                            Button {
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
-                                    scopeMode = .focused
-                                    focusedPackageName = pkg.name
-                                    selectedNodeName = pkg.name
-                                    store.selectedPackage = pkg
-                                }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Circle()
-                                        .fill(pkg.isLeaf ? Color.mint : Color.cyan)
-                                        .frame(width: 7, height: 7)
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack(spacing: 5) {
-                                            Text(pkg.name)
-                                                .font(.system(size: 12.5, weight: isSelected ? .bold : .semibold, design: .rounded))
-                                                .foregroundStyle(isSelected ? Color.white : Color.primary)
-                                                .lineLimit(1)
-                                            if pkg.isLeaf {
-                                                Text("LEAF")
-                                                    .font(.system(size: 8.5, weight: .bold, design: .rounded))
-                                                    .padding(.horizontal, 4)
-                                                    .padding(.vertical, 1)
-                                                    .foregroundStyle(Color.mint)
-                                                    .background(Capsule().fill(Color.mint.opacity(0.16)))
-                                            }
-                                        }
-                                        let depCount = Set(pkg.dependencies + pkg.runtimeDependencies).count
-                                        let revCount = store.reverseDependencies(for: pkg.name).count
-                                        Text("\(depCount) deps • \(revCount) dependents")
-                                            .font(.system(size: 10, weight: .regular, design: .rounded))
-                                            .foregroundStyle(Color.secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(isSelected ? Color.cyan : Color.secondary.opacity(0.5))
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(isSelected ? Color.cyan.opacity(0.22) : Color.white.opacity(0.03))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                                .strokeBorder(isSelected ? Color.cyan.opacity(0.55) : Color.clear, lineWidth: 1)
-                                        )
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
         }
-        .padding(14)
-        .liquidGlassCard(cornerRadius: 20)
+        .onChange(of: scopeMode) { _, _ in resetViewport() }
     }
 
-    // MARK: - Top Graph Toolbar
-
     private var graphTopToolbar: some View {
-        HStack(spacing: 10) {
-            // Layout mode picker
-            HStack(spacing: 4) {
-                ForEach(GraphLayoutMode.allCases) { mode in
-                    let isSelected = layoutMode == mode
-                    Button {
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.8)) {
-                            layoutMode = mode
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: mode == .radial ? "circle.hexagongrid.fill" : "list.bullet.indent")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text(mode.rawValue)
-                                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .foregroundStyle(isSelected ? Color.white : Color.primary)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(isSelected ? Color.cyan.opacity(0.8) : Color.clear)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(4)
-            .liquidGlassCard(cornerRadius: 20)
-
+        HStack {
+            Picker("Layout", selection: $layoutMode) {
+                Text("Radial").tag(GraphLayoutMode.radial)
+                Text("Tree").tag(GraphLayoutMode.hierarchical)
+            }.frame(width: 160)
             Spacer()
-
-            // Zoom Controls
-            HStack(spacing: 6) {
-                GlassPillButton("", icon: "minus.magnifyingglass", tint: .cyan) {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                        zoomScale = max(0.45, zoomScale - 0.2)
-                    }
-                }
-                Text("\(Int(zoomScale * 100))%")
-                    .font(.system(size: 11.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.secondary)
-                    .frame(width: 46)
-                GlassPillButton("", icon: "plus.magnifyingglass", tint: .cyan) {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                        zoomScale = min(2.4, zoomScale + 0.2)
-                    }
-                }
-                GlassPillButton("Reset View", icon: "scope", tint: .indigo) {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        resetViewport()
-                    }
-                }
-            }
-            .padding(5)
-            .liquidGlassCard(cornerRadius: 20)
+            Button("Zoom Out", systemImage: "minus.magnifyingglass") { zoomScale = max(0.45, zoomScale - 0.2) }
+                .labelStyle(.iconOnly).help("Zoom Out")
+            Text("\(Int(zoomScale * 100))%")
+                .font(.system(.caption, design: .monospaced)).frame(width: 40)
+            Button("Zoom In", systemImage: "plus.magnifyingglass") { zoomScale = min(2.4, zoomScale + 0.2) }
+                .labelStyle(.iconOnly).help("Zoom In")
+            Button("Reset") { resetViewport() }
         }
+        .controlSize(.small)
+        .buttonStyle(.glass)
     }
 
     private func resetViewport() {
@@ -475,7 +292,7 @@ public struct DependencyGraphView: View {
                     }
             )
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipped()
     }
 
     private func transformPoint(_ pt: CGPoint, in size: CGSize) -> CGPoint {
@@ -503,7 +320,7 @@ public struct DependencyGraphView: View {
             gridPath.addLine(to: CGPoint(x: size.width, y: y))
             y += spacing
         }
-        context.stroke(gridPath, with: .color(Color.white.opacity(0.035)), lineWidth: 0.7)
+        context.stroke(gridPath, with: .color(Color.primary.opacity(0.06)), lineWidth: 0.7)
     }
 
     private func drawEdges(context: inout GraphicsContext, graph: (nodes: [GraphNodeItem], edges: [GraphEdgeItem])) {
@@ -922,9 +739,7 @@ public struct DependencyGraphView: View {
             legendDot(color: .teal, title: "Transitive")
             legendDot(color: .purple, title: "Used By (Reverse)")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .liquidGlassCard(cornerRadius: 14)
+        .glassToolbar()
     }
 
     private func legendDot(color: Color, title: String) -> some View {
@@ -933,8 +748,8 @@ public struct DependencyGraphView: View {
                 .fill(color)
                 .frame(width: 7, height: 7)
             Text(title)
-                .font(.system(size: 10.5, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.secondary)
+                .fixedSize()
+                .font(.system(size: 10.5, weight: .medium))
         }
     }
 
@@ -945,10 +760,10 @@ public struct DependencyGraphView: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
+                    Text(pkg.name)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 6) {
-                        Text(pkg.name)
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.primary)
                         GlassBadge(pkg.version, color: .cyan)
                         if pkg.isLeaf {
                             GlassBadge("Leaf", icon: "leaf.fill", color: .mint)
@@ -957,34 +772,32 @@ public struct DependencyGraphView: View {
                     if let desc = pkg.desc, !desc.isEmpty {
                         Text(desc)
                             .font(.system(size: 11.5, design: .rounded))
-                            .foregroundStyle(Color.secondary)
                             .lineLimit(2)
                     }
                 }
                 Spacer()
-                Button {
+                Button("Close Inspector", systemImage: "xmark.circle.fill") {
                     withAnimation(.easeOut(duration: 0.2)) {
                         selectedNodeName = nil
                     }
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color.secondary)
                 }
+                .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
+                .help("Close Inspector")
             }
 
             HStack(spacing: 10) {
                 hudMetricPill(title: "Direct Deps", count: directDeps.count, color: .mint)
                 hudMetricPill(title: "Used By", count: revDeps.count, color: .purple)
-                hudMetricPill(title: "Tap", value: pkg.tap ?? "core", color: .cyan)
             }
+            LabeledContent("Tap", value: pkg.tap ?? "core")
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
 
             if !directDeps.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Requires (\(directDeps.count))")
                         .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.secondary)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 5) {
                             ForEach(directDeps, id: \.self) { dep in
@@ -1008,7 +821,6 @@ public struct DependencyGraphView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Required By (\(revDeps.count))")
                         .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.secondary)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 5) {
                             ForEach(revDeps) { rev in
@@ -1050,7 +862,7 @@ public struct DependencyGraphView: View {
             }
         }
         .padding(14)
-        .liquidGlassCard(cornerRadius: 16, tint: .cyan)
+        .liquidGlassCard(cornerRadius: 16, tint: .cyan.opacity(0.55))
     }
 
     private func hudMetricPill(title: String, count: Int, color: Color) -> some View {
@@ -1065,7 +877,6 @@ public struct DependencyGraphView: View {
                 .lineLimit(1)
             Text(title)
                 .font(.system(size: 9.5, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
@@ -1074,825 +885,5 @@ public struct DependencyGraphView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(color.opacity(0.1))
         )
-    }
-}
-
-// MARK: - 2. Taps & Brewfile Manager
-
-public struct TapsBrewfileView: View {
-    @ObservedObject public var store: BrewStore
-
-    @State private var newTapName: String = ""
-    @State private var tapFilterText: String = ""
-
-    public init(store: BrewStore) {
-        self.store = store
-    }
-
-    private var filteredTaps: [BrewTap] {
-        let query = tapFilterText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if query.isEmpty { return store.taps }
-        return store.taps.filter {
-            $0.name.lowercased().contains(query) ||
-            ($0.remote?.lowercased().contains(query) ?? false)
-        }
-    }
-
-    public var body: some View {
-        HStack(spacing: 16) {
-            // Left Column: Tap Repositories Manager
-            tapsPanel
-                .frame(maxWidth: .infinity)
-
-            // Right Column: Brewfile Bundle Studio
-            brewfileStudioPanel
-                .frame(maxWidth: .infinity)
-        }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 18)
-        .task {
-            if store.taps.isEmpty {
-                await store.refreshTaps()
-            }
-            if store.brewfilePreview.isEmpty {
-                await store.generateBrewfilePreview()
-            }
-        }
-    }
-
-    // MARK: - Taps Panel
-
-    private var tapsPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Panel Header
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "spigot.fill")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color.cyan)
-                        Text("Tap Repositories")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.primary)
-                        GlassBadge("\(store.taps.count) Active", color: .cyan)
-                    }
-                    Text("Third-party & official formula/cask repositories")
-                        .font(.system(size: 11.5, design: .rounded))
-                        .foregroundStyle(Color.secondary)
-                }
-                Spacer()
-                GlassPillButton("Refresh", icon: "arrow.clockwise", tint: .cyan, isDisabled: store.isLoading) {
-                    Task { await store.refreshTaps() }
-                }
-            }
-
-            // Add New Tap Bar
-            HStack(spacing: 10) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.cyan)
-
-                TextField("Add repository (e.g. homebrew/cask-fonts or user/repo)...", text: $newTapName)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12.5, design: .monospaced))
-                    .onSubmit {
-                        submitNewTap()
-                    }
-
-                GlassPillButton(
-                    "Tap Repository",
-                    icon: "arrow.down.circle.fill",
-                    tint: .cyan,
-                    isProminent: true,
-                    isDisabled: newTapName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isRunningCommand
-                ) {
-                    submitNewTap()
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .liquidGlassCard(cornerRadius: 14, tint: .cyan)
-
-            // Filter bar
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.secondary)
-                TextField("Search tapped repositories...", text: $tapFilterText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .rounded))
-                if !tapFilterText.isEmpty {
-                    Button {
-                        tapFilterText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.black.opacity(0.16))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.8)
-                    )
-            )
-
-            // Taps List
-            if filteredTaps.isEmpty {
-                VStack(spacing: 10) {
-                    Spacer()
-                    Image(systemName: "spigot")
-                        .font(.system(size: 32))
-                        .foregroundStyle(Color.secondary)
-                    Text(store.taps.isEmpty ? "No Taps Found" : "No Matching Taps")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.primary)
-                    Text("Add a GitHub repository in user/repo format above to expand available packages.")
-                        .font(.system(size: 12, design: .rounded))
-                        .foregroundStyle(Color.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 280)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(filteredTaps) { tap in
-                            tapCard(tap)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-        }
-        .padding(16)
-        .liquidGlassCard(cornerRadius: 20)
-    }
-
-    private func tapCard(_ tap: BrewTap) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 8) {
-                Image(systemName: tap.official ? "checkmark.seal.fill" : "shippingbox.and.arrow.backward.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(tap.official ? Color.mint : Color.cyan)
-
-                Text(tap.name)
-                    .font(.system(size: 13.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.primary)
-
-                if tap.official {
-                    GlassBadge("Official", icon: "star.fill", color: .mint)
-                } else {
-                    GlassBadge("Community", color: .indigo)
-                }
-
-                Spacer()
-
-                GlassPillButton(
-                    "Untap",
-                    icon: "trash",
-                    tint: .red,
-                    isDisabled: store.isRunningCommand
-                ) {
-                    Task { await store.removeTap(name: tap.name) }
-                }
-            }
-
-            if let remote = tap.remote, !remote.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "link")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.secondary)
-                    Text(remote)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Color.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-
-            HStack(spacing: 8) {
-                GlassBadge("\(tap.formulaCount) Formulae", icon: "terminal", color: .cyan)
-                GlassBadge("\(tap.caskCount) Casks", icon: "macwindow", color: .purple)
-                if let path = tap.path, !path.isEmpty {
-                    Text(path)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Color.secondary.opacity(0.75))
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                }
-                Spacer()
-            }
-        }
-        .padding(12)
-        .liquidGlassCard(cornerRadius: 14, tint: tap.official ? .mint : .cyan, isInteractive: true)
-    }
-
-    private func submitNewTap() {
-        let trimmed = newTapName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        newTapName = ""
-        Task {
-            await store.addTap(name: trimmed)
-        }
-    }
-
-    // MARK: - Brewfile Studio Panel
-
-    private var brewfileStudioPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "doc.text.fill")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color.indigo)
-                        Text("Brewfile Bundle Studio")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color.primary)
-                    }
-                    Text("Declarative system snapshot via brew bundle")
-                        .font(.system(size: 11.5, design: .rounded))
-                        .foregroundStyle(Color.secondary)
-                }
-
-                Spacer()
-
-                GlassPillButton(
-                    "Generate Preview",
-                    icon: "wand.and.stars",
-                    tint: .cyan,
-                    isDisabled: store.isRunningCommand
-                ) {
-                    Task { await store.generateBrewfilePreview() }
-                }
-            }
-
-            // Action Bar for Export & Import
-            HStack(spacing: 10) {
-                GlassPillButton(
-                    "Export Brewfile...",
-                    icon: "square.and.arrow.up.fill",
-                    tint: .cyan,
-                    isProminent: true,
-                    isDisabled: store.isRunningCommand
-                ) {
-                    promptExportBrewfile()
-                }
-
-                GlassPillButton(
-                    "Import / Run Brewfile...",
-                    icon: "square.and.arrow.down.fill",
-                    tint: .mint,
-                    isDisabled: store.isRunningCommand
-                ) {
-                    promptImportBrewfile()
-                }
-
-                Spacer()
-
-                if !store.brewfilePreview.isEmpty {
-                    GlassPillButton("Copy", icon: "doc.on.doc", tint: .indigo) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(store.brewfilePreview, forType: .string)
-                    }
-                }
-            }
-
-            // Monospaced Syntax-Highlighted Code View
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.black.opacity(0.32))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
-                    )
-
-                let lines = brewfilePreviewLines
-                ScrollView([.vertical, .horizontal]) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(Array(lines.enumerated()), id: \.offset) { idx, line in
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Text("\(idx + 1)")
-                                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                                    .foregroundStyle(Color.secondary.opacity(0.45))
-                                    .frame(width: 28, alignment: .trailing)
-
-                                styledBrewfileLine(line)
-                            }
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .frame(maxHeight: .infinity)
-        }
-        .padding(16)
-        .liquidGlassCard(cornerRadius: 20)
-    }
-
-    private var brewfilePreviewLines: [String] {
-        if !store.brewfilePreview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return store.brewfilePreview.components(separatedBy: .newlines)
-        }
-        // Synthesize live preview from current store state if preview hasn't been generated yet
-        var synthesized: [String] = [
-            "# LiquidBrew Declarative Bundle Preview",
-            "# Click 'Generate Preview' to run `brew bundle dump` live",
-            ""
-        ]
-        for tap in store.taps {
-            synthesized.append("tap \"\(tap.name)\"")
-        }
-        if !store.taps.isEmpty { synthesized.append("") }
-        for formula in store.installedPackages.filter({ !$0.isCask && $0.isLeaf }) {
-            synthesized.append("brew \"\(formula.name)\"")
-        }
-        let casks = store.installedPackages.filter { $0.isCask }
-        if !casks.isEmpty { synthesized.append("") }
-        for cask in casks {
-            synthesized.append("cask \"\(cask.name)\"")
-        }
-        return synthesized
-    }
-
-    private func styledBrewfileLine(_ line: String) -> some View {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        let color: Color
-        if trimmed.hasPrefix("#") {
-            color = Color.secondary
-        } else if trimmed.hasPrefix("tap ") {
-            color = Color.cyan
-        } else if trimmed.hasPrefix("brew ") {
-            color = Color.mint
-        } else if trimmed.hasPrefix("cask ") {
-            color = Color.purple
-        } else if trimmed.hasPrefix("mas ") || trimmed.hasPrefix("vscode ") {
-            color = Color.orange
-        } else {
-            color = Color.primary
-        }
-
-        return Text(line.isEmpty ? " " : line)
-            .font(.system(size: 12, weight: .medium, design: .monospaced))
-            .foregroundStyle(color)
-            .textSelection(.enabled)
-    }
-
-    private func promptExportBrewfile() {
-        let panel = NSSavePanel()
-        panel.title = "Export Homebrew Brewfile"
-        panel.nameFieldStringValue = "Brewfile"
-        panel.canCreateDirectories = true
-        panel.isExtensionHidden = false
-        if panel.runModal() == .OK, let url = panel.url {
-            Task {
-                await store.exportBrewfile(to: url)
-            }
-        }
-    }
-
-    private func promptImportBrewfile() {
-        let panel = NSOpenPanel()
-        panel.title = "Import & Run Brewfile"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            Task {
-                await store.importBrewfile(from: url)
-            }
-        }
-    }
-}
-
-// MARK: - 3. System Health & Cleanup Center
-
-public struct HealthCleanupView: View {
-    @ObservedObject public var store: BrewStore
-
-    @State private var showRawDoctorOutput: Bool = false
-
-    public init(store: BrewStore) {
-        self.store = store
-    }
-
-    private var report: BrewHealthReport {
-        store.healthReport
-    }
-
-    public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                // Top Hero Health Status Card
-                healthHeroBanner
-
-                // Three-Column / Grid Action Cards
-                HStack(alignment: .top, spacing: 16) {
-                    // 1. Brew Doctor Diagnostics
-                    doctorDiagnosticsCard
-                        .frame(maxWidth: .infinity)
-
-                    // 2. Cache & Disk Space Cleanup
-                    cacheCleanupCard
-                        .frame(maxWidth: .infinity)
-
-                    // 3. Orphaned Dependencies (Autoremove)
-                    autoremoveCard
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 22)
-        }
-        .task {
-            await store.refreshHealth()
-        }
-    }
-
-    // MARK: - Hero Banner
-
-    private var healthHeroBanner: some View {
-        let isHealthy = report.isHealthy && report.warnings.isEmpty
-        let statusTint: Color = isHealthy ? .mint : .orange
-
-        return HStack(spacing: 18) {
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [statusTint.opacity(0.45), statusTint.opacity(0.08)],
-                            center: .center,
-                            startRadius: 4,
-                            endRadius: 36
-                        )
-                    )
-                    .frame(width: 68, height: 68)
-                    .overlay(
-                        Circle()
-                            .strokeBorder(statusTint.opacity(0.6), lineWidth: 1.5)
-                    )
-
-                Image(systemName: isHealthy ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(statusTint)
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 10) {
-                    Text(isHealthy ? "Your System is Ready to Brew" : "\(report.warnings.count) Doctor Warning\(report.warnings.count == 1 ? "" : "s") Detected")
-                        .font(.system(size: 19, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.primary)
-
-                    GlassBadge(
-                        isHealthy ? "100% Healthy" : "Attention Needed",
-                        icon: isHealthy ? "sparkles" : "stethoscope",
-                        color: statusTint
-                    )
-                }
-
-                HStack(spacing: 16) {
-                    Label(report.brewVersion, systemImage: "mug.fill")
-                    Label("Prefix: \(report.homebrewPrefix)", systemImage: "folder.fill")
-                    Label("Cache: \(report.formattedCacheSize)", systemImage: "internaldrive.fill")
-                    Label("Checked \(report.checkedAt.formatted(date: .omitted, time: .shortened))", systemImage: "clock.fill")
-                }
-                .font(.system(size: 11.5, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.secondary)
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 8) {
-                GlassPillButton(
-                    "Run Full Check",
-                    icon: "stethoscope",
-                    tint: .cyan,
-                    isProminent: true,
-                    isDisabled: store.isRunningCommand
-                ) {
-                    Task {
-                        await store.runDoctor()
-                        await store.refreshHealth()
-                    }
-                }
-            }
-        }
-        .padding(18)
-        .liquidGlassCard(cornerRadius: 20, tint: statusTint)
-    }
-
-    // MARK: - 1. Brew Doctor Diagnostics Card
-
-    private var doctorDiagnosticsCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Image(systemName: "stethoscope")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.cyan)
-                Text("Brew Doctor Diagnostics")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.primary)
-                Spacer()
-                GlassBadge(
-                    report.warnings.isEmpty ? "Clean" : "\(report.warnings.count) Issues",
-                    color: report.warnings.isEmpty ? .mint : .orange
-                )
-            }
-
-            Text("Audits your local Homebrew installation for broken symlinks, unlinked kegs, and PATH configuration issues.")
-                .font(.system(size: 11.5, design: .rounded))
-                .foregroundStyle(Color.secondary)
-
-            HStack(spacing: 8) {
-                GlassPillButton(
-                    "Run Doctor",
-                    icon: "play.fill",
-                    tint: .cyan,
-                    isProminent: true,
-                    isDisabled: store.isRunningCommand
-                ) {
-                    Task { await store.runDoctor() }
-                }
-
-                GlassPillButton(
-                    showRawDoctorOutput ? "Hide Raw Output" : "Raw Output",
-                    icon: "terminal",
-                    tint: .indigo
-                ) {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                        showRawDoctorOutput.toggle()
-                    }
-                }
-            }
-
-            Divider()
-                .overlay(Color.white.opacity(0.08))
-
-            if showRawDoctorOutput {
-                ScrollView {
-                    Text(report.rawOutput.isEmpty ? "Your system is ready to brew." : report.rawOutput)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Color.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .padding(10)
-                }
-                .frame(minHeight: 160, maxHeight: 260)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.black.opacity(0.28))
-                )
-            } else if report.warnings.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(Color.mint)
-                    Text("No Diagnostic Warnings")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.primary)
-                    Text("All kegs, compilers, and environment variables passed inspection.")
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(Color.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(report.warnings.enumerated()), id: \.offset) { _, warning in
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Color.orange)
-                                    .padding(.top, 2)
-                                Text(warning)
-                                    .font(.system(size: 11.5, design: .rounded))
-                                    .foregroundStyle(Color.primary)
-                                    .textSelection(.enabled)
-                            }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color.orange.opacity(0.1))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .strokeBorder(Color.orange.opacity(0.3), lineWidth: 0.8)
-                                    )
-                            )
-                        }
-                    }
-                }
-                .frame(maxHeight: 260)
-            }
-        }
-        .padding(16)
-        .liquidGlassCard(cornerRadius: 20)
-    }
-
-    // MARK: - 2. Cache & Disk Space Cleanup Card
-
-    private var cacheCleanupCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Image(systemName: "internaldrive.fill")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.purple)
-                Text("Cache & Disk Cleanup")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.primary)
-                Spacer()
-                GlassBadge(report.formattedCacheSize, color: .purple)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Cached downloads & old bottle archives:")
-                    .font(.system(size: 11.5, design: .rounded))
-                    .foregroundStyle(Color.secondary)
-                Text(report.cachePath)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(Color.secondary.opacity(0.8))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
-            HStack(spacing: 8) {
-                GlassPillButton(
-                    "Preview (Dry Run)",
-                    icon: "magnifyingglass",
-                    tint: .cyan,
-                    isDisabled: store.isRunningCommand
-                ) {
-                    Task { await store.runCleanup(dryRun: true) }
-                }
-
-                GlassPillButton(
-                    "Clean Cache Now",
-                    icon: "sparkles",
-                    tint: .purple,
-                    isProminent: true,
-                    isDisabled: store.isRunningCommand
-                ) {
-                    Task { await store.runCleanup(dryRun: false) }
-                }
-            }
-
-            Divider()
-                .overlay(Color.white.opacity(0.08))
-
-            if report.cleanupDryRunItems.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 26))
-                        .foregroundStyle(Color.purple.opacity(0.8))
-                    Text("Cache is Tidy")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.primary)
-                    Text("Click 'Preview (Dry Run)' to scan for stale downloads or outdated keg versions.")
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(Color.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Reclaimable Items (\(report.cleanupDryRunItems.count))")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.secondary)
-
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 5) {
-                            ForEach(Array(report.cleanupDryRunItems.enumerated()), id: \.offset) { _, item in
-                                HStack(spacing: 6) {
-                                    Image(systemName: "doc.zipper")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(Color.purple)
-                                    Text(item)
-                                        .font(.system(size: 10.5, design: .monospaced))
-                                        .foregroundStyle(Color.primary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 5)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(Color.white.opacity(0.04))
-                                )
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 230)
-                }
-            }
-        }
-        .padding(16)
-        .liquidGlassCard(cornerRadius: 20)
-    }
-
-    // MARK: - 3. Orphaned Dependencies (Autoremove) Card
-
-    private var autoremoveCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Image(systemName: "scissors")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.mint)
-                Text("Orphaned Dependencies")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.primary)
-                Spacer()
-                GlassBadge("\(report.autoremoveCandidates.count) Orphans", color: report.autoremoveCandidates.isEmpty ? .mint : .orange)
-            }
-
-            Text("Formulae installed automatically as dependencies that are no longer required by any top-level package.")
-                .font(.system(size: 11.5, design: .rounded))
-                .foregroundStyle(Color.secondary)
-
-            HStack(spacing: 8) {
-                GlassPillButton(
-                    "Run Autoremove",
-                    icon: "trash.slash.fill",
-                    tint: .mint,
-                    isProminent: true,
-                    isDisabled: store.isRunningCommand || report.autoremoveCandidates.isEmpty
-                ) {
-                    Task { await store.runAutoremove() }
-                }
-
-                GlassPillButton(
-                    "Rescan",
-                    icon: "arrow.clockwise",
-                    tint: .cyan,
-                    isDisabled: store.isLoading
-                ) {
-                    Task { await store.refreshHealth() }
-                }
-            }
-
-            Divider()
-                .overlay(Color.white.opacity(0.08))
-
-            if report.autoremoveCandidates.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "leaf.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(Color.mint)
-                    Text("Zero Unused Dependencies")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.primary)
-                    Text("Every installed dependency formula is actively referenced by an installed package.")
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(Color.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Unused Formulae (\(report.autoremoveCandidates.count))")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.secondary)
-
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 6) {
-                            ForEach(report.autoremoveCandidates, id: \.self) { candidate in
-                                HStack(spacing: 8) {
-                                    Image(systemName: "cube.box")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(Color.orange)
-                                    Text(candidate)
-                                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                        .foregroundStyle(Color.primary)
-                                    Spacer()
-                                    GlassBadge("Unused", color: .orange)
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(Color.orange.opacity(0.08))
-                                )
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 230)
-                }
-            }
-        }
-        .padding(16)
-        .liquidGlassCard(cornerRadius: 20)
     }
 }

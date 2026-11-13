@@ -561,59 +561,27 @@ public actor BrewCLIService {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        async let formulaSearch = runCommand(["search", "--formula", trimmed])
-        async let caskSearch = runCommand(["search", "--cask", trimmed])
-
+        async let formulaSearch = runCommand(["search", "--formula", "--", trimmed])
+        async let caskSearch = runCommand(["search", "--cask", "--", trimmed])
         let (fRes, cRes) = try await (formulaSearch, caskSearch)
+        let formulaNames = Array(try BrewSearchOutput.names(from: fRes).prefix(30))
+        let caskNames = Array(try BrewSearchOutput.names(from: cRes).prefix(30))
+        // Resolve each kind explicitly: formulae and casks can share a token.
+        async let formulae = enrichSearch(names: formulaNames, isCask: false, installedNames: installedNames)
+        async let casks = enrichSearch(names: caskNames, isCask: true, installedNames: installedNames)
+        return await formulae + casks
+    }
 
-        let formulaNames = fRes.stdout
-            .components(separatedBy: .newlines)
-            .flatMap { $0.split(whereSeparator: { $0.isWhitespace }).map(String.init) }
-            .filter { !$0.isEmpty && !$0.hasPrefix("==>") }
-
-        let caskNames = cRes.stdout
-            .components(separatedBy: .newlines)
-            .flatMap { $0.split(whereSeparator: { $0.isWhitespace }).map(String.init) }
-            .filter { !$0.isEmpty && !$0.hasPrefix("==>") }
-
-        // Enrich top matches using `brew info --json=v2` for rich descriptions & versions
-        let topFormulae = Array(formulaNames.prefix(15))
-        let topCasks = Array(caskNames.prefix(15))
-        let targets = topFormulae + topCasks
-
-        if !targets.isEmpty {
-            let infoRes = try? await runCommand(["info", "--json=v2"] + targets)
-            if let data = infoRes?.stdout.data(using: .utf8),
-               let detailed = try? Self.parseRemoteInfoJSONv2(data: data, installedNames: installedNames),
-               !detailed.isEmpty {
-                return detailed
-            }
-        }
-
-        var fallbackResults: [BrewPackage] = []
-        for f in topFormulae {
-            fallbackResults.append(
-                BrewPackage(
-                    name: f,
-                    fullName: f,
-                    desc: "Homebrew Formula",
-                    version: "latest",
-                    isCask: false
-                )
+    private func enrichSearch(names: [String], isCask: Bool, installedNames: Set<String>) async -> [BrewPackage] {
+        guard !names.isEmpty else { return [] }
+        let result = try? await runCommand(["info", "--json=v2", isCask ? "--cask" : "--formula", "--"] + names)
+        let detailed = result?.stdout.data(using: .utf8).flatMap { try? Self.parseRemoteInfoJSONv2(data: $0, installedNames: installedNames) } ?? []
+        return names.map { name in
+            detailed.first { $0.name == name || $0.fullName == name } ?? BrewPackage(
+                name: name, fullName: name,
+                desc: isCask ? "macOS application" : "Homebrew formula", version: "latest", isCask: isCask
             )
         }
-        for c in topCasks {
-            fallbackResults.append(
-                BrewPackage(
-                    name: c,
-                    fullName: c,
-                    desc: "macOS Cask Application",
-                    version: "latest",
-                    isCask: true
-                )
-            )
-        }
-        return fallbackResults
     }
 
     private static func parseRemoteInfoJSONv2(data: Data, installedNames: Set<String>) throws -> [BrewPackage] {

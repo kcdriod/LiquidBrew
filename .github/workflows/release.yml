@@ -1,0 +1,96 @@
+name: Release DMG
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to release, for example v1.0.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build universal app and publish DMG
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Validate release version
+        id: version
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo 'Use a tag such as v1.0.0 or v1.0.0-beta.1.' >&2
+            exit 1
+          fi
+          VERSION="${RELEASE_TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "APP_VERSION=${VERSION%%-*}" >> "$GITHUB_ENV"
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select the full Xcode toolchain
+        shell: bash
+        run: |
+          if [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer" >> "$GITHUB_ENV"
+          else
+            echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+          fi
+      - name: Run deterministic tests
+        run: swift test --disable-sandbox
+      - name: Build the universal release app
+        env:
+          BUILD_CONFIGURATION: release
+          BUILD_ARCHS: arm64 x86_64
+          APP_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./build_app.sh
+      - name: Create and verify the DMG and checksum
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/build_dmg.sh "$VERSION"
+      - name: Preserve release artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: LiquidBrew-${{ steps.version.outputs.version }}-universal
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/liquidbrew-release-notes.md" <<'NOTES'
+          ## Install
+          Download the universal DMG below, open it, and drag LiquidBrew into Applications.
+          Requires macOS 26 or newer and an existing Homebrew installation.
+          The app supports Apple Silicon and Intel Macs.
+
+          Community builds are ad-hoc signed and are not Apple-notarized. macOS may show
+          a Gatekeeper warning. Only install a build whose source and origin you trust.
+
+          A SHA-256 checksum is included alongside the DMG. Contributions and bug reports are welcome!
+          NOTES
+          PRERELEASE_ARGS=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then PRERELEASE_ARGS+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" dist/*.dmg dist/*.sha256 \
+            --verify-tag --title "LiquidBrew ${RELEASE_TAG#v}" \
+            --notes-file "$RUNNER_TEMP/liquidbrew-release-notes.md" \
+            --generate-notes "${PRERELEASE_ARGS[@]}"

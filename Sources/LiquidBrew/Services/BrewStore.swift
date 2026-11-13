@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UserNotifications
 
 @MainActor
 public final class BrewStore: ObservableObject {
@@ -10,6 +11,15 @@ public final class BrewStore: ObservableObject {
 
     @Published public var installedPackages: [BrewPackage] = []
     @Published public var discoverResults: [BrewPackage] = []
+    @Published var hasSearchedDiscover = false
+    @Published var discoverSearchError: String?
+    private var discoverSearchID = UUID()
+    @Published var discoverCharts: [DiscoverCatalog: DiscoverChartSnapshot] = [:]
+    @Published var loadingDiscoverCharts: Set<DiscoverCatalog> = []
+    @Published var discoverChartErrors: [DiscoverCatalog: String] = [:]
+    private let chartsService = DiscoverChartsService()
+    private var activeDiscoverQuery: String?
+    private let packageSearch: (String, Set<String>) async throws -> [BrewPackage]
     @Published public var outdatedPackages: [OutdatedPackage] = []
     @Published public var services: [BrewServiceItem] = []
     @Published public var taps: [BrewTap] = []
@@ -20,15 +30,105 @@ public final class BrewStore: ObservableObject {
     @Published public var isSearchingDiscover: Bool = false
     @Published public var isRunningCommand: Bool = false
     @Published public var currentCommandTitle: String = ""
+    @Published public private(set) var commandStartedAt: Date?
     @Published public var showTerminalDrawer: Bool = false
     @Published public var terminalLogs: [CommandLogEntry] = []
     @Published public var brewfilePreview: String = ""
     @Published public var statusBannerMessage: String?
 
+    @Published var securityFindings: [SecurityFinding] = []
+    @Published var securitySources: [SecuritySourceStatus] = []
+    @Published var isCheckingSecurity = false
+    @Published var securityNotificationsEnabled = UserDefaults.standard.bool(forKey: "securityNotificationsEnabled")
+    @Published var notificationMessage: String?
+    private let securityService = PackageSecurityService()
+    private var packageInventoryLoaded = false
+
+    var installedSecurityFindings: [SecurityFinding] {
+        let ids = Set(installedPackages.map(\.id))
+        return securityFindings.filter { ids.contains($0.packageID) }
+            .sorted { $0.isMalwareWarning && !$1.isMalwareWarning }
+    }
+
+    func refreshSecurity() async {
+        guard packageInventoryLoaded, !isCheckingSecurity else { return }
+        isCheckingSecurity = true
+        defer { isCheckingSecurity = false }
+        let inventory = installedPackages
+        let results = await securityService.scan(packages: inventory)
+        if inventory != installedPackages {
+            isCheckingSecurity = false
+            await refreshSecurity()
+            return
+        }
+        for result in results {
+            if result.status.error == nil {
+                securityFindings.removeAll { $0.sourceID == result.status.id }
+                securityFindings.append(contentsOf: result.findings)
+            }
+            let previous = securitySources.first { $0.id == result.status.id }
+            var status = result.status
+            if status.error != nil { status.checkedAt = previous?.checkedAt }
+            securitySources.removeAll { $0.id == status.id }
+            securitySources.append(status)
+        }
+        // Keep cached warnings if a source fails, but never for an uninstalled package.
+        let installedIDs = Set(installedPackages.map(\.id))
+        securityFindings.removeAll { !installedIDs.contains($0.packageID) }
+        let defaults = UserDefaults.standard
+        defaults.set(try? JSONEncoder().encode(securityFindings), forKey: "securityFindings")
+        defaults.set(try? JSONEncoder().encode(securitySources), forKey: "securitySources")
+        await notifyNewSecurityFindings()
+    }
+
+    func setSecurityNotifications(_ enabled: Bool) async {
+        if enabled {
+            do {
+                guard try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) else {
+                    notificationMessage = "Notifications are disabled. Allow LiquidBrew in System Settings → Notifications."
+                    return
+                }
+            } catch {
+                notificationMessage = "Could not enable notifications: \(error.localizedDescription)"
+                return
+            }
+        }
+        securityNotificationsEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "securityNotificationsEnabled")
+        notificationMessage = nil
+        if enabled { await notifyNewSecurityFindings() }
+    }
+
+    private func notifyNewSecurityFindings() async {
+        guard securityNotificationsEnabled else { return }
+        let defaults = UserDefaults.standard
+        var delivered = Set(defaults.stringArray(forKey: "securityDeliveredFindings") ?? [])
+        let newFindings = installedSecurityFindings.filter { !delivered.contains($0.id) }
+        guard !newFindings.isEmpty else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Package security reports to review"
+        content.body = "\(Set(newFindings.map(\.packageID)).count) installed package(s) matched reports. Open LiquidBrew’s Security tab to review sources and removal options."
+        content.sound = .default
+        do {
+            try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "liquidbrew-security", content: content, trigger: nil))
+            delivered.formUnion(newFindings.map(\.id))
+            defaults.set(Array(delivered).sorted(), forKey: "securityDeliveredFindings")
+        } catch {
+            notificationMessage = "Could not deliver security notification: \(error.localizedDescription)"
+        }
+    }
+
     private let cli: BrewCLIService
 
-    public init(cli: BrewCLIService = .shared) {
+    public init(cli: BrewCLIService = .shared, packageSearch: ((String, Set<String>) async throws -> [BrewPackage])? = nil) {
         self.cli = cli
+        self.packageSearch = packageSearch ?? { query, names in
+            try await cli.searchPackages(query: query, installedNames: names)
+        }
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: "discoverCharts"), let cached = try? JSONDecoder().decode([DiscoverCatalog: DiscoverChartSnapshot].self, from: data) { discoverCharts = cached }
+        if let data = defaults.data(forKey: "securityFindings"), let cached = try? JSONDecoder().decode([SecurityFinding].self, from: data) { securityFindings = cached }
+        if let data = defaults.data(forKey: "securitySources"), let cached = try? JSONDecoder().decode([SecuritySourceStatus].self, from: data) { securitySources = cached }
     }
 
     public var filteredPackages: [BrewPackage] {
@@ -46,7 +146,7 @@ public final class BrewStore: ObservableObject {
             if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return true
             }
-            let query = searchText.lowercased()
+            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             return pkg.name.lowercased().contains(query) ||
                 pkg.fullName.lowercased().contains(query) ||
                 (pkg.desc?.lowercased().contains(query) ?? false)
@@ -78,6 +178,9 @@ public final class BrewStore: ObservableObject {
         do {
             let pkgs = try await cli.fetchInstalledPackages()
             self.installedPackages = pkgs
+            packageInventoryLoaded = true
+            securityFindings.removeAll { finding in !pkgs.contains { $0.id == finding.packageID } }
+            Task { await refreshSecurity() }
             if let currentSelected = selectedPackage {
                 self.selectedPackage = pkgs.first(where: { $0.id == currentSelected.id }) ?? pkgs.first
             } else if selectedPackage == nil {
@@ -120,23 +223,56 @@ public final class BrewStore: ObservableObject {
         self.healthReport = report
     }
 
-    public func searchRemotePackages(query: String) async {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            discoverResults = []
-            return
-        }
-
-        isSearchingDiscover = true
-        defer { isSearchingDiscover = false }
-
+    func loadDiscoverCharts(_ catalog: DiscoverCatalog, force: Bool = false) async {
+        guard !loadingDiscoverCharts.contains(catalog) else { return }
+        loadingDiscoverCharts.insert(catalog)
+        defer { loadingDiscoverCharts.remove(catalog) }
+        discoverChartErrors[catalog] = nil
         do {
-            let installedSet = Set(installedPackages.map(\.name))
-            let results = try await cli.searchPackages(query: trimmed, installedNames: installedSet)
-            if trimmed == discoverSearchText.trimmingCharacters(in: .whitespacesAndNewlines) || !results.isEmpty {
-                self.discoverResults = results
+            discoverCharts[catalog] = try await chartsService.load(catalog, force: force)
+            if let data = try? JSONEncoder().encode(discoverCharts) {
+                UserDefaults.standard.set(data, forKey: "discoverCharts")
             }
         } catch {
+            discoverChartErrors[catalog] = error.localizedDescription
+        }
+    }
+
+    func resetDiscoverSearch() {
+        discoverSearchID = UUID()
+        activeDiscoverQuery = nil
+        isSearchingDiscover = false
+        discoverResults = []
+        discoverSearchError = nil
+        hasSearchedDiscover = false
+    }
+
+    public func searchRemotePackages(query: String) async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { resetDiscoverSearch(); return }
+        guard !(isSearchingDiscover && activeDiscoverQuery == trimmed) else { return }
+        let requestID = UUID()
+        discoverSearchID = requestID
+        activeDiscoverQuery = trimmed
+        isSearchingDiscover = true
+        hasSearchedDiscover = true
+        discoverSearchError = nil
+        discoverResults = []
+        defer {
+            if discoverSearchID == requestID {
+                isSearchingDiscover = false
+                activeDiscoverQuery = nil
+            }
+        }
+        do {
+            let results = try await packageSearch(trimmed, Set(installedPackages.map(\.name)))
+            guard discoverSearchID == requestID, !Task.isCancelled,
+                  trimmed == discoverSearchText.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+            discoverResults = results
+        } catch {
+            guard discoverSearchID == requestID, !Task.isCancelled,
+                  trimmed == discoverSearchText.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+            discoverSearchError = error.localizedDescription
             appendLog("Search failed for '\(trimmed)': \(error.localizedDescription)", isError: true)
         }
     }
@@ -160,9 +296,11 @@ public final class BrewStore: ObservableObject {
     }
 
     public func uninstallPackage(_ package: BrewPackage) async {
+        guard !isRunningCommand, installedPackages.contains(where: { $0.id == package.id }) else { return }
+        let caskToken = package.tap.map { "\($0)/\(package.name)" } ?? package.name
         let args = package.isCask
-            ? ["uninstall", "--cask", package.name]
-            : ["uninstall", package.name]
+            ? ["uninstall", "--cask", caskToken]
+            : ["uninstall", "--formula", package.fullName]
         let code = await executeStreamingCommand(
             title: "Uninstalling \(package.name)...",
             arguments: args,
@@ -391,7 +529,9 @@ public final class BrewStore: ObservableObject {
         arguments: [String],
         openDrawer: Bool
     ) async -> Int32 {
+        guard !isRunningCommand else { return -1 }
         isRunningCommand = true
+        commandStartedAt = Date()
         currentCommandTitle = title
         if openDrawer {
             showTerminalDrawer = true
@@ -400,20 +540,30 @@ public final class BrewStore: ObservableObject {
         let cmdDisplay = "$ brew " + arguments.joined(separator: " ")
         appendLog(cmdDisplay, isHeader: true)
 
-        do {
-            let exitCode = try await cli.streamCommand(arguments) { [weak self] line, isErr in
-                Task { @MainActor [weak self] in
-                    self?.appendLog(line, isError: isErr)
-                }
+        let (output, continuation) = AsyncStream<(String, Bool)>.makeStream()
+        let outputTask = Task { @MainActor [weak self] in
+            for await (line, isError) in output {
+                self?.appendLog(line, isError: isError)
             }
+        }
+        do {
+            let exitCode = try await cli.streamCommand(arguments) { line, isError in
+                continuation.yield((line, isError))
+            }
+            continuation.finish()
+            await outputTask.value
+            let elapsed = Date().timeIntervalSince(commandStartedAt ?? Date())
+            let duration = String(format: "%.1fs", elapsed)
             let statusLine = exitCode == 0
-                ? "✓ Completed (\(arguments.first ?? "brew"))"
-                : "✗ Exited with code \(exitCode)"
+                ? "✓ Completed (\(arguments.first ?? "brew")) in \(duration)"
+                : "✗ Exited with code \(exitCode) after \(duration)"
             appendLog(statusLine, isError: exitCode != 0)
             isRunningCommand = false
             currentCommandTitle = ""
             return exitCode
         } catch {
+            continuation.finish()
+            await outputTask.value
             appendLog("Error: \(error.localizedDescription)", isError: true)
             isRunningCommand = false
             currentCommandTitle = ""

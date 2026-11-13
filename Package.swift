@@ -16,6 +16,7 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]
-        )
+        ),
+        .testTarget(name: "LiquidBrewTests", dependencies: ["LiquidBrew"])
     ]
 )
