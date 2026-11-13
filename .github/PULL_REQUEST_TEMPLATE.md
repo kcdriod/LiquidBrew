@@ -1,6 +1,6 @@
 ## Target branch
 
-Contributor PRs must target **develop**. Only this repository's **develop → master** promotion may target master. Required checks and @kcdriod approval must pass before merging.
+Contributor PRs must target **develop**. Only this repository's **develop → master** promotion may target master. Required checks must pass before merging. Contributor PRs require @kcdriod approval; that owner account has a review-only exception for merging passing PRs, including its own.
 
 ## What changes?
 

@@ -152,19 +152,21 @@ feature/fix/docs branch → PR to develop → PR from develop to master → DMG 
 
 | Route | Required checks | Required approval | Result |
 | --- | --- | --- | --- |
-| Contributor branch → `develop` | **PR branch policy** and **Develop tests** (script validation, release-automation tests, deterministic Swift tests) | Code-owner approval from **@kcdriod** | Integrates the change; no release is built. |
-| This repository's `develop` → `master` | **PR branch policy** and **Master full suite** (all Swift tests including live checks, release-automation tests, optimized universal app, and verified DMG) | Code-owner approval from **@kcdriod** | A successful merge starts the production build and release workflow. |
+| Contributor branch → `develop` | **PR branch policy** and **Develop tests** (script validation, release-automation tests, deterministic Swift tests) | Code-owner approval from **@kcdriod**, with the owner exception below | Integrates the change; no release is built. |
+| This repository's `develop` → `master` | **PR branch policy** and **Master full suite** (all Swift tests including live checks, release-automation tests, optimized universal app, and verified DMG) | Code-owner approval from **@kcdriod**, with the owner exception below | A successful merge starts the production build and release workflow. |
 | Any other branch/repository → `master` | Policy check fails | — | Cannot merge; retarget to `develop`. |
 
-Both protected branches require up-to-date checks, resolved review conversations, and fresh approval after new commits. Direct pushes, force pushes, and branch deletion are blocked, including for administrators. Approval does not grant repository write access: only existing maintainers/collaborators with merge permission can merge a passing, approved PR.
+Both protected branches require up-to-date checks and resolved review conversations. Direct pushes, force pushes, and branch deletion are blocked, including for administrators. Approval does not grant repository write access: only existing maintainers/collaborators with merge permission can merge a PR.
 
-GitHub permits creating a PR with another base, so the policy blocks its **merge**, rather than preventing the PR form from being opened. GitHub does not permit approving your own PR; a maintainer-authored PR needs another eligible reviewer, and the maintainer/code-owner requirement still applies where GitHub requires it.
+**Owner review exception:** **@kcdriod** is already the repository owner/admin and may merge a passing PR without a separate approving review, including PRs authored by that account. GitHub's owner bypass option applies only to the separate review ruleset and only through a PR. The non-bypassable branch protections still require the correct source branch, passing checks, up-to-date code, and resolved conversations. Other collaborators still need code-owner approval, and new commits dismiss stale approvals.
+
+GitHub permits creating a PR with another base, so the policy blocks its **merge**, rather than preventing the PR form from being opened. GitHub does not record self-approving reviews; the owner's review exception removes the need for a second reviewer without fabricating an approval.
 
 ### Publishing a version
 
 1. Finish contributor PRs into `develop` with the required checks and review.
 2. Open a promotion PR **from this repository's `develop` to `master`**.
-3. Wait for **Master full suite** and the policy check, resolve conversations, and obtain the required review.
+3. Wait for **Master full suite** and the policy check, resolve conversations, and obtain the required review (or use the owner review exception as **@kcdriod**).
 4. Merge using a merge commit. The **Release DMG** workflow builds that exact approved merge, creates a version tag, and publishes a universal DMG and SHA-256 checksum.
 5. Before the next promotion, open a `master` → `develop` synchronization PR if `develop` is behind. It follows the normal develop checks and approval process. Keep both long-lived branches; do not delete `develop` after a promotion.
 
