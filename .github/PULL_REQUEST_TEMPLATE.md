@@ -1,3 +1,7 @@
+## Target branch
+
+Contributor PRs must target **develop**. Only this repository's **develop → master** promotion may target master. Required checks and @kcdriod approval must pass before merging.
+
 ## What changes?
 
 Explain the problem and resulting behavior. Link any related issue.

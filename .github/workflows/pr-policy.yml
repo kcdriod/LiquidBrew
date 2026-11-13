@@ -1,0 +1,32 @@
+name: PR branch policy
+
+on:
+  pull_request_target:
+    branches: [develop, master]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    name: PR branch policy
+    runs-on: ubuntu-24.04
+    steps:
+      # Never check out or execute PR code in this trusted-base workflow.
+      - name: Validate the PR route
+        env:
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          if [[ "$BASE_BRANCH" == develop ]]; then
+            echo 'Contributor PR: target develop, pass Develop tests, and request @kcdriod review.'
+          elif [[ "$BASE_BRANCH" == master && "$HEAD_BRANCH" == develop && "$HEAD_REPOSITORY" == "$TARGET_REPOSITORY" ]]; then
+            echo 'Release promotion: develop → master; the full suite and maintainer approval are required.'
+          else
+            echo 'PRs to master are only allowed from this repository’s develop branch. Retarget your PR to develop.' >&2
+            exit 1
+          fi

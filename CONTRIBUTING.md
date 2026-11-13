@@ -12,7 +12,7 @@ New here? Start with a documentation fix, a clear reproduction of an existing bu
 
 You need macOS 26 or newer, full Xcode with a matching macOS SDK, Swift 6 or newer, and Homebrew.
 
-1. Fork the repository and clone your fork.
+1. Fork the repository, clone your fork, and start from the default `develop` branch.
 2. Create a focused branch, for example `fix/discover-empty-state`.
 3. Run `./build_app.sh` and open `LiquidBrew.app`.
 4. Run `swift test --disable-sandbox` with `DEVELOPER_DIR` pointing to your full Xcode installation.
@@ -34,6 +34,8 @@ Add meaningful tests for parsing, state/race handling, or ranking behavior affec
 
 ## Submit a pull request
 
+Target **`develop`** for every contributor PR, including documentation and workflow changes. PRs from feature branches or forks into `master` cannot pass the required branch policy. `master` accepts only a promotion from this repository's `develop` branch.
+
 Describe the concrete problem and resulting behavior. Include:
 
 - A short description of what changed and why.
@@ -42,7 +44,9 @@ Describe the concrete problem and resulting behavior. Include:
 - Screenshots for UI changes, with personal information removed.
 - Any important limits, follow-up work, or new external services.
 
-The Build and test workflow runs deterministic tests and builds the app on macOS 26. Please address failures related to your change. Maintainers may suggest a smaller scope or a different approach.
+Contributor PRs need **PR branch policy** and **Develop tests** to pass. Develop tests validate scripts, exercise release-version automation, and run deterministic Swift tests on macOS 26. Request review from **@kcdriod**, the code owner. New commits dismiss stale approvals. Resolve review conversations and update your branch against `develop` before merging.
+
+Passing tests alone are not permission to merge: code-owner approval is required, and only people with repository merge permission can merge. Administrators follow the same protection rules. GitHub does not let a PR author approve their own PR; do not bypass review by using automation to impersonate a reviewer.
 
 ## Reporting bugs and requesting features
 
@@ -52,11 +56,20 @@ For a feature, explain the task you are trying to accomplish and what would impr
 
 ## Release maintenance
 
-The release workflow builds both `arm64` and `x86_64`, creates a DMG, and uploads the image and checksum to a GitHub release for a `vMAJOR.MINOR.PATCH` tag. Prerelease suffixes are supported.
+`develop` is the integration branch and `master` is the production/release branch. There is no separate `main` branch.
 
-Before tagging, run tests, build the app, and update documentation for user-visible changes. Verify release artifacts in Actions. Release publishing requires repository write permission; pull requests do not receive a publishing token.
+1. Open a PR from this repository's **`develop` to `master`**.
+2. The required **Master full suite** runs release-automation tests and all Swift tests, including Homebrew/news/analytics live checks. It builds an optimized universal app and verifies a validation DMG. **PR branch policy** also checks the source branch and repository.
+3. Obtain the required code-owner review from **@kcdriod**. Keep the branch up to date and resolve all review conversations.
+4. Merge only after every required check and review passes. Use the merge-commit option; the repository disables squash/rebase merges to preserve promotion history.
+5. The merged PR triggers **Release DMG**, which builds the exact merge commit, reserves its version tag, and publishes the DMG and checksum.
+6. Synchronize `master` back into `develop` through a normal PR before the next promotion when GitHub reports that `develop` is behind. Both long-lived branches are protected against deletion.
 
-Apple notarization is a welcome future contribution. Do not commit signing identities, certificates, or passwords to implement it.
+Leave `RELEASE_VERSION` as `auto` for the next patch release. To choose a major/minor version, change it in a reviewed contributor PR before promotion, then reset it to `auto` during the next development cycle. Explicit versions must be newer than the stable tags. Do not create a release by manually pushing a tag; use the promotion route. Rerun a failed release workflow to retry its original version.
+
+You can manually dispatch **Build and test** on `develop` or `master` to validate their respective suites without publishing. The full suite depends on live public sources; fix or retry a failed source check instead of bypassing it.
+
+Apple notarization remains welcome future work. Never commit signing identities, certificates, or passwords.
 
 ## License and collaboration
 

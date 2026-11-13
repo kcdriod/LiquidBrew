@@ -140,22 +140,41 @@ LIQUIDBREW_DISCOVER_LIVE_TESTS=1 LIQUIDBREW_SECURITY_LIVE_TESTS=1 \
   swift test --disable-sandbox
 ```
 
-The live Discover test queries Homebrew and public charts; it does not install packages. Local live checks currently exercise 15 tests in total. GitHub pull-request checks run the deterministic tests and verify that the app builds.
+The live Discover test queries Homebrew and public charts; it does not install packages. Local live checks currently exercise 15 tests in total. Contributor PR checks run deterministic tests; promotions into `master` also run the live checks and validate the universal app and DMG. Release automation has a separate Python test suite: `python3 -m unittest discover -s Tests/Automation -v`.
 
-## Releases and automation
+## Branching, reviews, and releases
 
-- **Build and test:** runs on pull requests, pushes to `main`/`master`, and manual dispatches using a macOS 26 GitHub-hosted runner.
-- **Release DMG:** pushing a version tag such as `v1.0.0` runs tests, builds an optimized universal app, verifies its signature and architectures, creates and verifies a compressed DMG, and publishes it with its checksum to GitHub Releases.
-- Tags such as `v1.1.0-beta.1` become prereleases. The numeric version is embedded in the app; the workflow run number becomes the bundle build number.
-- The release workflow also accepts an existing tag through **Actions → Release DMG → Run workflow**. Use a new version tag for a new published release.
-- Release artifacts are also retained with the workflow run for 14 days. Publishing uses GitHub's repository-scoped token; no personal access token is required.
-
-Maintainers can publish a version with:
-
-```sh
-git tag -a v1.0.0 -m 'LiquidBrew 1.0.0'
-git push origin v1.0.0
+```text
+feature/fix/docs branch → PR to develop → PR from develop to master → DMG + GitHub release
 ```
+
+**`develop` is the default branch. `master` is the release branch; this project does not use a separate `main` branch.** Fork or branch from `develop` and target contributor pull requests there.
+
+| Route | Required checks | Required approval | Result |
+| --- | --- | --- | --- |
+| Contributor branch → `develop` | **PR branch policy** and **Develop tests** (script validation, release-automation tests, deterministic Swift tests) | Code-owner approval from **@kcdriod** | Integrates the change; no release is built. |
+| This repository's `develop` → `master` | **PR branch policy** and **Master full suite** (all Swift tests including live checks, release-automation tests, optimized universal app, and verified DMG) | Code-owner approval from **@kcdriod** | A successful merge starts the production build and release workflow. |
+| Any other branch/repository → `master` | Policy check fails | — | Cannot merge; retarget to `develop`. |
+
+Both protected branches require up-to-date checks, resolved review conversations, and fresh approval after new commits. Direct pushes, force pushes, and branch deletion are blocked, including for administrators. Approval does not grant repository write access: only existing maintainers/collaborators with merge permission can merge a passing, approved PR.
+
+GitHub permits creating a PR with another base, so the policy blocks its **merge**, rather than preventing the PR form from being opened. GitHub does not permit approving your own PR; a maintainer-authored PR needs another eligible reviewer, and the maintainer/code-owner requirement still applies where GitHub requires it.
+
+### Publishing a version
+
+1. Finish contributor PRs into `develop` with the required checks and review.
+2. Open a promotion PR **from this repository's `develop` to `master`**.
+3. Wait for **Master full suite** and the policy check, resolve conversations, and obtain the required review.
+4. Merge using a merge commit. The **Release DMG** workflow builds that exact approved merge, creates a version tag, and publishes a universal DMG and SHA-256 checksum.
+5. Before the next promotion, open a `master` → `develop` synchronization PR if `develop` is behind. It follows the normal develop checks and approval process. Keep both long-lived branches; do not delete `develop` after a promotion.
+
+`RELEASE_VERSION` defaults to **`auto`**: stable versions advance by one patch (`v1.0.0` → `v1.0.1` → `v1.0.2`). To select a minor or major release, change the file to a numeric version such as `1.1.0` or `2.0.0` in a reviewed PR to `develop`; reset it to `auto` in the next cycle. The full suite rejects an explicit version that has already been used or is older than a stable release.
+
+Version tags are reserved atomically, so concurrent promotions cannot claim the same version. Rerunning a failed release reuses the tag already assigned to its merge commit. Already-published assets are preserved. If builds finish out of order, GitHub selects the latest stable release by its legacy semantic-version/date policy.
+
+The numeric version is embedded in the app, and the workflow run number becomes its bundle build number. Release artifacts are retained with the run for 14 days. A repository-scoped GitHub token handles publishing; a manually pushed tag does **not** start a release. To retry a failure, rerun the original **Release DMG** run in Actions.
+
+The **Build and test** workflow can be run manually on `develop` (quick checks) or `master` (full validation without publishing). The release workflow runs only when an eligible promotion PR has actually been merged.
 
 Apple Developer ID signing and notarization are not configured yet. Contributions to that release process are welcome.
 
@@ -170,7 +189,7 @@ Sources/LiquidBrew/
   Services/                    Homebrew commands, app state, charts, security sources
   Views/                       Packages, Discover, updates, services, graph, maintenance
 Tests/LiquidBrewTests/          Deterministic and opt-in live tests
-.github/workflows/             Pull-request checks and tagged DMG releases
+.github/workflows/             Branch policy, staged PR checks, and master-merge releases
 build_app.sh                   Build, package, icon generation, and ad-hoc signing
 scripts/build_dmg.sh            Universal DMG creation and checksum
 ```

@@ -1,59 +1,65 @@
 name: Release DMG
 
 on:
-  push:
-    tags: ['v*.*.*']
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Existing version tag to release, for example v1.0.0'
-        required: true
-        type: string
+  pull_request:
+    branches: [master]
+    types: [closed]
 
 permissions:
   contents: read
 
+# Different promotions may run in parallel. Atomic tag creation prevents version
+# collisions; a rerun of the same promotion reuses its already-reserved version.
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  group: release-${{ github.event.pull_request.merge_commit_sha || github.run_id }}
   cancel-in-progress: false
 
 jobs:
   release:
     name: Build universal app and publish DMG
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'develop' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: macos-26
     timeout-minutes: 45
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+      GH_REPO: ${{ github.repository }}
     steps:
-      - name: Validate release version
-        id: version
-        shell: bash
-        run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo 'Use a tag such as v1.0.0 or v1.0.0-beta.1.' >&2
-            exit 1
-          fi
-          VERSION="${RELEASE_TAG#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "APP_VERSION=${VERSION%%-*}" >> "$GITHUB_ENV"
-      - name: Check out the release tag
+      - name: Check out the approved master merge
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ env.RELEASE_SHA }}
           fetch-depth: 0
           persist-credentials: false
       - name: Select the full Xcode toolchain
         shell: bash
         run: |
           if [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer" >> "$GITHUB_ENV"
+            echo 'DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer' >> "$GITHUB_ENV"
           else
             echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
           fi
-      - name: Run deterministic tests
-        run: swift test --disable-sandbox
+      - name: Test the approved merge
+        env:
+          LIQUIDBREW_DISCOVER_LIVE_TESTS: '1'
+          LIQUIDBREW_SECURITY_LIVE_TESTS: '1'
+        run: |
+          python3 -m unittest discover -s Tests/Automation -v
+          swift test --disable-sandbox
+      - name: Reserve the next release version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="$(python3 scripts/release_version.py --commit "$RELEASE_SHA" --reserve)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "APP_VERSION=${TAG#v}" >> "$GITHUB_ENV"
       - name: Build the universal release app
         env:
           BUILD_CONFIGURATION: release
@@ -74,23 +80,32 @@ jobs:
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         shell: bash
         run: |
+          PUBLISHED_STATE="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [[ "$PUBLISHED_STATE" == false ]]; then
+            echo "Release $RELEASE_TAG is already published; its existing assets are preserved."
+            RELEASE_ID="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq .id)"
+            gh api --method PATCH "repos/$GH_REPO/releases/$RELEASE_ID" -f make_latest=legacy >/dev/null
+            exit 0
+          fi
           cat > "$RUNNER_TEMP/liquidbrew-release-notes.md" <<'NOTES'
           ## Install
-          Download the universal DMG below, open it, and drag LiquidBrew into Applications.
-          Requires macOS 26 or newer and an existing Homebrew installation.
-          The app supports Apple Silicon and Intel Macs.
+          Download the universal DMG, open it, and drag LiquidBrew into Applications.
+          Requires macOS 26 or newer and Homebrew. Supports Apple Silicon and Intel Macs.
 
           Community builds are ad-hoc signed and are not Apple-notarized. macOS may show
           a Gatekeeper warning. Only install a build whose source and origin you trust.
 
-          A SHA-256 checksum is included alongside the DMG. Contributions and bug reports are welcome!
+          A SHA-256 checksum is included. This version was built from an approved
+          develop → master promotion. Contributions and bug reports are welcome!
           NOTES
-          PRERELEASE_ARGS=()
-          if [[ "$RELEASE_TAG" == *-* ]]; then PRERELEASE_ARGS+=(--prerelease); fi
+          # All publishing happens in this workflow. A tag created using GITHUB_TOKEN
+          # intentionally does not need to trigger another workflow.
           gh release create "$RELEASE_TAG" dist/*.dmg dist/*.sha256 \
-            --verify-tag --title "LiquidBrew ${RELEASE_TAG#v}" \
-            --notes-file "$RUNNER_TEMP/liquidbrew-release-notes.md" \
-            --generate-notes "${PRERELEASE_ARGS[@]}"
+            --verify-tag --title "LiquidBrew ${RELEASE_TAG#v}" --latest=false \
+            --notes-file "$RUNNER_TEMP/liquidbrew-release-notes.md" --generate-notes
+          RELEASE_ID="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq .id)"
+          # Let GitHub choose latest by semantic version even if parallel builds finish out of order.
+          gh api --method PATCH "repos/$GH_REPO/releases/$RELEASE_ID" -f make_latest=legacy >/dev/null

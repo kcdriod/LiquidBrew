@@ -2,20 +2,23 @@ name: Build and test
 
 on:
   push:
-    branches: [main, master]
+    branches: [develop]
   pull_request:
+    branches: [develop, master]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: macOS build and tests
+  develop-tests:
+    name: Develop tests
+    if: github.base_ref == 'develop' || github.ref == 'refs/heads/develop'
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -27,19 +30,66 @@ jobs:
         shell: bash
         run: |
           if [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
-            echo "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer" >> "$GITHUB_ENV"
+            echo 'DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer' >> "$GITHUB_ENV"
           else
             echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
           fi
-      - name: Show toolchain
-        run: |
-          xcodebuild -version
-          swift --version
-      - name: Check scripts and whitespace
+      - name: Validate scripts and release automation
         run: |
           zsh -n build_app.sh scripts/build_dmg.sh
           git diff --check
-      - name: Run deterministic tests
+          python3 -m unittest discover -s Tests/Automation -v
+      - name: Run deterministic Swift tests
         run: swift test --disable-sandbox
-      - name: Build and verify the app bundle
-        run: ./build_app.sh
+
+  master-full-suite:
+    name: Master full suite
+    if: github.base_ref == 'master' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Only accept release promotions from develop
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          TARGET_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          [[ "$HEAD_BRANCH" == develop && "$HEAD_REPOSITORY" == "$TARGET_REPOSITORY" ]] || {
+            echo 'Retarget contributor PRs to develop. Only develop may be promoted to master.' >&2
+            exit 1
+          }
+      - name: Check out the proposed merge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select the full Xcode toolchain
+        shell: bash
+        run: |
+          if [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
+            echo 'DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer' >> "$GITHUB_ENV"
+          else
+            echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+          fi
+      - name: Validate scripts and release version
+        run: |
+          zsh -n build_app.sh scripts/build_dmg.sh
+          git diff --check
+          python3 -m unittest discover -s Tests/Automation -v
+          python3 scripts/release_version.py
+      - name: Run the full Swift suite including live-source checks
+        env:
+          LIQUIDBREW_DISCOVER_LIVE_TESTS: '1'
+          LIQUIDBREW_SECURITY_LIVE_TESTS: '1'
+        run: swift test --disable-sandbox
+      - name: Validate universal release packaging
+        env:
+          BUILD_CONFIGURATION: release
+          BUILD_ARCHS: arm64 x86_64
+          APP_VERSION: 0.0.0
+          APP_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          ./build_app.sh
+          ./scripts/build_dmg.sh 0.0.0-validation
