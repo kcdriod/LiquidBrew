@@ -32,6 +32,59 @@ shasum -a 256 -c LiquidBrew-1.0.0-universal.dmg.sha256
 
 Use the filename matching the version you downloaded. You can also [build from source](#build-from-source).
 
+## Terminal version
+
+LiquidBrew also runs as an animated, keyboard driven terminal app on macOS 26 or newer. It shares the desktop app’s Homebrew actions, charts, diagnostics, and security report matching. A steaming ASCII mug animates in the header. Press `A` for a larger ASCII splash with animated steam, and Space to pause it.
+
+Build and install from this checkout with full Xcode selected.
+
+```sh
+./scripts/install_cli.sh
+~/.local/bin/liquidbrew
+```
+
+The installer builds the `LiquidBrewCLI` product and installs it as `liquidbrew` in `~/.local/bin`, or in `LIQUIDBREW_BIN_DIR` when set. The desktop product is `LiquidBrew`. These build names are distinct on case insensitive macOS volumes. Add the install directory to your shell’s `PATH` to invoke `liquidbrew` from anywhere.
+
+```sh
+liquidbrew --demo                  # Sample data, Homebrew commands disabled
+liquidbrew --renderer gpu          # Require Metal animation rendering
+liquidbrew --gpu-info              # Identify the GPU and verify a rendered frame
+liquidbrew --renderer cpu          # CPU animation fallback
+liquidbrew --fps 30                # 1–60 FPS target, default 24
+liquidbrew --no-animation          # Start with motion paused
+liquidbrew --snapshot              # Plain sample screen suitable for redirected output
+liquidbrew list --versions         # Direct Homebrew command
+liquidbrew search ripgrep
+```
+
+Metal computes the animated header’s color field on the GPU. The terminal renders the text and dependency edges. [Ghostty uses Metal for terminal rendering on macOS](https://ghostty.org/docs/features), so it can accelerate that stage too. The header identifies the active animation renderer. Automatic mode falls back to CPU if Metal is unavailable, while `--renderer gpu` reports a startup error. Motion can be paused with Space.
+
+Use a terminal with UTF-8 and true color at least 80 columns by 24 rows. The app adapts its list and detail panes to the window width and redraws changed cells. Enter expands details in narrower windows. The alternate screen, cursor visibility, and terminal settings are restored on normal exit and handled interruption. Quitting during a Homebrew action waits for it to finish before exit.
+
+| Keys | Action |
+| --- | --- |
+| `1`–`8` | Packages, Discover, Updates, Services, Graph, Taps, Health, Security |
+| Left/Right, Tab outside Graph | Switch screens |
+| Up/Down, `j`/`k` | Move selection |
+| `/`, Enter, Esc | Search or filter, expand details, return or clear filter |
+| `r`, `l`, `w`, `?`, `q` | Refresh, console, save logs, help, quit |
+| `A`, Space, Page Up/Down | Open ASCII art, pause motion, scroll details or console |
+| Packages `u`, `x`, `p`, `f`, `g` | Upgrade, remove, pin/unpin, filter, graph |
+| Graph `t`, `n`, `f`, `v` | Radial/tree layout, focused/top-level network, top-level sidebar filter, expand canvas |
+| Graph `+`/`-`, arrows, `0` | Zoom, pan, reset viewport |
+| Graph `[`/`]` or Tab, `i`, Enter, `e` | Select node, inspector, focus graph here, inspect in Packages |
+| Discover `i`, `f`, `c`, `t` | Install, formula/app catalog, charts, trending |
+| Updates `u`, `a`, `U` | Upgrade selected, upgrade all, update Homebrew index |
+| Services `s`, `t`, `R` | Start, stop, restart |
+| Taps `a`, `x`, `b`, `e`, `m` | Add, remove, Brewfile preview, export, import |
+| Health `d`, `c`, `C`, `a` | Doctor, cleanup preview, cleanup, autoremove |
+
+In the terminal workspace, package changes display the operation and require `y` to confirm. Demo mode disables those actions. Export and log saving require a new output path. Security reports retain their source links and review language. macOS notification delivery remains a desktop feature.
+
+The terminal and desktop graph share one layout engine, including direct and runtime dependencies, transitive nodes, reverse dependents, and the GUI’s network size limits. Layout changes animate between the same coordinates. Terminal node labels avoid overlapping where space is available. Keyboard node selection brings a node into view and its inspector shows its full name and relationships. Referenced dependencies that are not installed can be inspected. Focus and the jump to Packages use installed formulae.
+
+Direct commands after `liquidbrew`, such as `install`, `uninstall`, `services`, or `bundle`, run Homebrew with the exact supplied arguments, standard input, and exit status. They use Homebrew’s own prompts. `liquidbrew --help` lists supported commands.
+
 ## Screenshots
 
 ### Discover: Top Charts
