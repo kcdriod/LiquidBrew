@@ -43,7 +43,7 @@ Build and install from this checkout with full Xcode selected.
 ~/.local/bin/liquidbrew
 ```
 
-The installer places the executable in `~/.local/bin`, or in `LIQUIDBREW_BIN_DIR` when set. Add that directory to your shell’s `PATH` to invoke `liquidbrew` from anywhere.
+The installer builds the `LiquidBrewCLI` product and installs it as `liquidbrew` in `~/.local/bin`, or in `LIQUIDBREW_BIN_DIR` when set. The desktop product is `LiquidBrew`. These build names are distinct on case insensitive macOS volumes. Add the install directory to your shell’s `PATH` to invoke `liquidbrew` from anywhere.
 
 ```sh
 liquidbrew --demo                  # Sample data, Homebrew commands disabled

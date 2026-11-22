@@ -6,7 +6,7 @@ enum LiquidBrewCommand {
     @MainActor static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
         let executable = URL(fileURLWithPath: CommandLine.arguments[0]).lastPathComponent
-        guard executable == "liquidbrew" || arguments.first == "--tui" else {
+        guard executable == "liquidbrew" || executable == "LiquidBrewCLI" || arguments.first == "--tui" else {
             LiquidBrewApp.main()
             return
         }

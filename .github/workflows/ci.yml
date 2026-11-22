@@ -36,11 +36,23 @@ jobs:
           fi
       - name: Validate scripts and release automation
         run: |
-          zsh -n build_app.sh scripts/build_dmg.sh
+          zsh -n build_app.sh scripts/build_dmg.sh scripts/install_cli.sh
           git diff --check
           python3 -m unittest discover -s Tests/Automation -v
       - name: Run deterministic Swift tests
         run: swift test --disable-sandbox
+      - name: Validate desktop and CLI executables
+        shell: bash
+        run: |
+          BIN_DIR="$(swift build --show-bin-path)"
+          test -x "$BIN_DIR/LiquidBrew"
+          test -x "$BIN_DIR/LiquidBrewCLI"
+          if [[ "$BIN_DIR/LiquidBrew" -ef "$BIN_DIR/LiquidBrewCLI" ]]; then
+            echo 'Desktop and CLI products must have distinct output files.' >&2
+            exit 1
+          fi
+          "$BIN_DIR/LiquidBrewCLI" --help
+          "$BIN_DIR/LiquidBrewCLI" --snapshot --renderer cpu
 
   master-full-suite:
     name: Master full suite
@@ -75,7 +87,7 @@ jobs:
           fi
       - name: Validate scripts and release version
         run: |
-          zsh -n build_app.sh scripts/build_dmg.sh
+          zsh -n build_app.sh scripts/build_dmg.sh scripts/install_cli.sh
           git diff --check
           python3 -m unittest discover -s Tests/Automation -v
           python3 scripts/release_version.py

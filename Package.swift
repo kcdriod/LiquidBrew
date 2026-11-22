@@ -8,7 +8,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "LiquidBrew", targets: ["LiquidBrew"]),
-        .executable(name: "liquidbrew", targets: ["LiquidBrew"])
+        .executable(name: "LiquidBrewCLI", targets: ["LiquidBrew"])
     ],
     targets: [
         .executableTarget(
