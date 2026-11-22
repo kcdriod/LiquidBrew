@@ -100,7 +100,7 @@ public final class BrewStore: ObservableObject {
     }
 
     private func notifyNewSecurityFindings() async {
-        guard securityNotificationsEnabled else { return }
+        guard notificationsAvailable, securityNotificationsEnabled else { return }
         let defaults = UserDefaults.standard
         var delivered = Set(defaults.stringArray(forKey: "securityDeliveredFindings") ?? [])
         let newFindings = installedSecurityFindings.filter { !delivered.contains($0.id) }
@@ -119,9 +119,11 @@ public final class BrewStore: ObservableObject {
     }
 
     private let cli: BrewCLIService
+    private let notificationsAvailable: Bool
 
-    public init(cli: BrewCLIService = .shared, packageSearch: ((String, Set<String>) async throws -> [BrewPackage])? = nil) {
+    public init(cli: BrewCLIService = .shared, packageSearch: ((String, Set<String>) async throws -> [BrewPackage])? = nil, notificationsAvailable: Bool = true) {
         self.cli = cli
+        self.notificationsAvailable = notificationsAvailable
         self.packageSearch = packageSearch ?? { query, names in
             try await cli.searchPackages(query: query, installedNames: names)
         }

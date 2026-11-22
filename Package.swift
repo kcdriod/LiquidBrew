@@ -7,7 +7,8 @@ let package = Package(
         .macOS("26.0")
     ],
     products: [
-        .executable(name: "LiquidBrew", targets: ["LiquidBrew"])
+        .executable(name: "LiquidBrew", targets: ["LiquidBrew"]),
+        .executable(name: "liquidbrew", targets: ["LiquidBrew"])
     ],
     targets: [
         .executableTarget(
@@ -15,7 +16,8 @@ let package = Package(
             path: "Sources/LiquidBrew",
             swiftSettings: [
                 .swiftLanguageMode(.v5)
-            ]
+            ],
+            linkerSettings: [.linkedFramework("Metal"), .linkedFramework("CoreGraphics")]
         ),
         .testTarget(name: "LiquidBrewTests", dependencies: ["LiquidBrew"])
     ]

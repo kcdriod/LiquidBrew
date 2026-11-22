@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 
-@main
 struct LiquidBrewApp: App {
     @StateObject private var store = BrewStore()
 
